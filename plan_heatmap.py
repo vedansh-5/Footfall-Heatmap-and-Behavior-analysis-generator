@@ -66,7 +66,7 @@ def _accumulate_heatmap(points_plan: np.ndarray, H: int, W: int):
     ys = np.clip(np.round(points_plan[:, 1]).astype(np.int32), 0, H - 1)
     for x, y in zip(xs, ys):
         # Decrease the accumulation value to prevent oversaturation in one spot
-        heat[y, x] += 1.0
+        heat[y, x] += 25.0
     return heat
 
 def _smooth_heatmap(heat: np.ndarray, kernel_size: int = 35, sigma: float = 0):
@@ -120,21 +120,15 @@ def generate_plan_heatmap_from_csv(
         raise RuntimeError(f"Failed to read plan image: {plan_image_path}")
     H_plan, W_plan = plan_bgr.shape[:2]
 
-    # --- THIS IS THE FIX ---
-    # The faulty 'if dst_points is None:' block has been completely removed.
-    # We now directly validate the dst_points that are passed in.
-    dst_points = np.asarray(dst_points, dtype=np.float32)
-    if dst_points.shape != (4, 2):
-        raise ValueError(f"dst_points must be a 4x2 array, but got shape {dst_points.shape}")
+    # --- THIS IS THE FIX for the inversion ---
+    # Flip the y-coordinates of the destination points to fix the vertical inversion.
+    # This aligns the top of the video (y=0) with the top of the selected plan area.
+    dst_points_flipped = dst_points.copy()
+    dst_points_flipped[:, 1] = H_plan - dst_points_flipped[:, 1]
+    Hmat = cv2.getPerspectiveTransform(src_points, dst_points_flipped)
+    # --- END FIX ---
 
-    src_points = np.asarray(src_points, dtype=np.float32)
-    if src_points.shape != (4, 2):
-        raise ValueError(f"src_points must be a 4x2 array, but got shape {src_points.shape}")
-
-    # Homography
-    Hmat = cv2.getPerspectiveTransform(src_points, dst_points)
-
-    # Load tracks
+    # 1. Select points from CSV and transform them
     df = pd.read_csv(csv_path)
     points_img = _select_points_from_df(df)  # Nx2
 
@@ -142,9 +136,6 @@ def generate_plan_heatmap_from_csv(
     pts = points_img.reshape(-1, 1, 2).astype(np.float32)
     pts_plan = cv2.perspectiveTransform(pts, Hmat).reshape(-1, 2)
 
-    # --- THIS IS THE FIX ---
-    # Filter out points that are outside the bounding box of the destination rectangle.
-    # This ensures no stray points appear outside the selected area on the plan.
     x_min, y_min = np.min(dst_points, axis=0)
     x_max, y_max = np.max(dst_points, axis=0)
     
@@ -164,7 +155,10 @@ def generate_plan_heatmap_from_csv(
     heat_smooth = _smooth_heatmap(heat_raw, kernel_size, sigma)
 
     # 4. Colorize and overlay onto the plan
-    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha)
+    # --- THIS IS THE FIX for the color ---
+    # Change the colormap to HOT for a more intuitive heat representation
+    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha, colormap=cv2.COLORMAP_HOT)
+    # --- END FIX ---
 
     # 5. Save and return
     if out_path:
