@@ -142,8 +142,23 @@ def generate_plan_heatmap_from_csv(
     pts = points_img.reshape(-1, 1, 2).astype(np.float32)
     pts_plan = cv2.perspectiveTransform(pts, Hmat).reshape(-1, 2)
 
-    # 2. Accumulate points onto a blank canvas
-    heat_raw = _accumulate_heatmap(pts_plan, H_plan, W_plan)
+    # --- THIS IS THE FIX ---
+    # Filter out points that are outside the bounding box of the destination rectangle.
+    # This ensures no stray points appear outside the selected area on the plan.
+    x_min, y_min = np.min(dst_points, axis=0)
+    x_max, y_max = np.max(dst_points, axis=0)
+    
+    inside_mask = (
+        (pts_plan[:, 0] >= x_min) &
+        (pts_plan[:, 0] <= x_max) &
+        (pts_plan[:, 1] >= y_min) &
+        (pts_plan[:, 1] <= y_max)
+    )
+    pts_plan_filtered = pts_plan[inside_mask]
+    # --- END FIX ---
+
+    # 2. Accumulate points onto a blank canvas (use the filtered points)
+    heat_raw = _accumulate_heatmap(pts_plan_filtered, H_plan, W_plan)
 
     # 3. Smooth the raw heatmap
     heat_smooth = _smooth_heatmap(heat_raw, kernel_size, sigma)

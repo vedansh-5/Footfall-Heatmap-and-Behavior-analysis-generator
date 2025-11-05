@@ -33,11 +33,12 @@ def track_video(video_path, output_path):
             break
         results = model(frame)[0]
         detections = []  #detects all
-        # detections = [d for d in detections if d[5] == 0]  #detects only people
-
+        
+        # Filter detections to only include the 'person' class (class ID 0)
         for box, conf, cls in zip(results.boxes.xyxy, results.boxes.conf, results.boxes.cls):
-            x1, y1, x2, y2 = box.tolist()
-            detections.append([[x1, y1, x2-x1, y2-y1], conf, int(cls)])
+            if int(cls) == 0: # 0 is the class ID for 'person' in COCO
+                x1, y1, x2, y2 = box.tolist()
+                detections.append([[x1, y1, x2-x1, y2-y1], conf, int(cls)])
 
         tracks = tracker.update_tracks(detections, frame=frame)
         for t in tracks:

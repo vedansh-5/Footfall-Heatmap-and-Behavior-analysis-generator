@@ -15,7 +15,8 @@ def run_detection(video_path, save_output_path):
         ret, frame = cap.read()
         if not ret:
             break
-        results = model(frame)
+        # Tell the model to only detect the 'person' class (ID 0)
+        results = model(frame, classes=0)
         annotated_frame = results[0].plot()
         out.write(annotated_frame)
     
