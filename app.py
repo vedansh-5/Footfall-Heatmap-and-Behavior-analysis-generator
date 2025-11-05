@@ -8,10 +8,10 @@ from bev_model import MonoLayoutBEV
 from bev_floor_plan import generate_floor_plan
 from bev_mapper import map_tracks_to_bev
 from generate_bev_heatmap import generate_bev_heatmap
-from homography_config import src_points
+from homography_config import src_points as default_src_points # Rename default
 from plan_heatmap import generate_plan_heatmap_from_csv, parse_points_str
-from plan_point_picker import pick_plan_points             # NEW
-from plan_heatmap_service import run_and_save_plan_heatmap # NEW
+from plan_point_picker import pick_plan_points
+from plan_heatmap_service import run_and_save_plan_heatmap
 
 
 import os
@@ -85,19 +85,43 @@ if uploaded_video:
 st.markdown("---")
 st.header("Heatmap on Floor Plan")
 
-plan_file = st.file_uploader("Upload Floor Plan Image (PNG/JPG)", type=["png", "jpg", "jpeg"], key="plan_upload")
+# --- START: NEW ---
+# Create two columns for point definition
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("1. Define Source Points (Video)")
+    st.info("These are the 4 corner points from the **video frame** that correspond to the plan area.")
+    # Create a default string from the imported points
+    default_src_str = "; ".join([f"{p[0]},{p[1]}" for p in default_src_points])
+    src_points_str = st.text_area("Source Points (x1,y1; x2,y2; ...)", value=default_src_str, height=100)
+
+with col2:
+    st.subheader("2. Pick Destination Points (Plan)")
+    plan_file = st.file_uploader("Upload Floor Plan Image", type=["png", "jpg", "jpeg"], key="plan_upload")
+    plan_path, dst_pts = pick_plan_points(plan_file, state_key="plan_points")
+
+st.markdown("---")
+st.subheader("3. Generate Heatmap")
+# --- END: NEW ---
+
 # Increase the default kernel size for better smoothing on high-res images
 kernel_size = st.slider("Heatmap smoothing (kernel size)", min_value=5, max_value=201, value=75, step=2)
 sigma = st.slider("Gaussian sigma (0 = auto)", min_value=0, max_value=100, value=0, step=1)
 alpha = st.slider("Overlay opacity", min_value=0.1, max_value=0.95, value=0.6, step=0.05)
 
-# Replace manual text coordinates with clickable picker
-plan_path, dst_pts = pick_plan_points(plan_file, state_key="plan_points")
-
 # Restructure the logic to give clear error messages
 if st.button("Generate Plan Heatmap"):
     # First, check for the button click, then validate the inputs.
-    if not plan_path:
+    src_points = None
+    try:
+        src_points = parse_points_str(src_points_str)
+    except Exception as e:
+        st.error(f"Invalid Source Points format: {e}")
+
+    if src_points is None:
+        pass # Error already shown
+    elif not plan_path:
         st.error("Please upload a floor plan image first.")
     elif not csv_path or not os.path.isfile(csv_path):
         st.error(f"Tracking CSV not found at '{csv_path}'. Please run tracking or verify the path.")
