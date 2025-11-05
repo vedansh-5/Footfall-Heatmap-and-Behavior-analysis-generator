@@ -85,25 +85,22 @@ if uploaded_video:
 st.markdown("---")
 st.header("Heatmap on Floor Plan")
 
-# --- START: NEW ---
-# Create two columns for point definition
-col1, col2 = st.columns(2)
+# --- START: MODIFICATION ---
+# Remove the two-column layout to allow the point-picker to use full width.
 
-with col1:
-    st.subheader("1. Define Source Points (Video)")
-    st.info("These are the 4 corner points from the **video frame** that correspond to the plan area.")
-    # Create a default string from the imported points
-    default_src_str = "; ".join([f"{p[0]},{p[1]}" for p in default_src_points])
-    src_points_str = st.text_area("Source Points (x1,y1; x2,y2; ...)", value=default_src_str, height=100)
+st.subheader("1. Define Source Points (Video)")
+st.info("These are the 4 corner points from the **video frame** that correspond to the plan area.")
+# Create a default string from the imported points
+default_src_str = "; ".join([f"{p[0]},{p[1]}" for p in default_src_points])
+src_points_str = st.text_area("Source Points (x1,y1; x2,y2; ...)", value=default_src_str, height=100)
 
-with col2:
-    st.subheader("2. Pick Destination Points (Plan)")
-    plan_file = st.file_uploader("Upload Floor Plan Image", type=["png", "jpg", "jpeg"], key="plan_upload")
-    plan_path, dst_pts = pick_plan_points(plan_file, state_key="plan_points")
+st.subheader("2. Pick Destination Points (Plan)")
+plan_file = st.file_uploader("Upload Floor Plan Image", type=["png", "jpg", "jpeg"], key="plan_upload")
+plan_path, dst_pts = pick_plan_points(plan_file, state_key="plan_points")
 
 st.markdown("---")
 st.subheader("3. Generate Heatmap")
-# --- END: NEW ---
+# --- END: MODIFICATION ---
 
 # Increase the default kernel size for better smoothing on high-res images
 kernel_size = st.slider("Heatmap smoothing (kernel size)", min_value=5, max_value=201, value=75, step=2)
