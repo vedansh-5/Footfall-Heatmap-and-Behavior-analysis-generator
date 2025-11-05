@@ -20,7 +20,8 @@ import pandas as pd
 st.title("Footfall HeatMap & Behaviour Analysis")
 
 uploaded_video = st.file_uploader("Upload CCTV Video", type=["mp4", "mov", "avi"])
-csv_path = st.text_input("Tracking CSV Path")
+# Provide a default path for the CSV file, as it's always the same.
+csv_path = st.text_input("Tracking CSV Path", value="output/tracks.csv")
 
 # Allow uploading BEV model weights and store to expected filename
 # with st.expander("BEV model weights (MonoLayout) - optional", expanded=False):
@@ -85,17 +86,25 @@ st.markdown("---")
 st.header("Heatmap on Floor Plan")
 
 plan_file = st.file_uploader("Upload Floor Plan Image (PNG/JPG)", type=["png", "jpg", "jpeg"], key="plan_upload")
-kernel_size = st.slider("Heatmap smoothing (kernel size)", min_value=5, max_value=101, value=35, step=2)
-sigma = st.slider("Gaussian sigma (0 = auto)", min_value=0, max_value=50, value=0, step=1)
+# Increase the default kernel size for better smoothing on high-res images
+kernel_size = st.slider("Heatmap smoothing (kernel size)", min_value=5, max_value=201, value=75, step=2)
+sigma = st.slider("Gaussian sigma (0 = auto)", min_value=0, max_value=100, value=0, step=1)
 alpha = st.slider("Overlay opacity", min_value=0.1, max_value=0.95, value=0.6, step=0.05)
 
 # Replace manual text coordinates with clickable picker
-plan_path, dst_pts = pick_plan_points(plan_file, state_key="plan_points")  # NEW
+plan_path, dst_pts = pick_plan_points(plan_file, state_key="plan_points")
 
-if st.button("Generate Plan Heatmap") and plan_path and csv_path:
-    if dst_pts is None or len(dst_pts) != 4:
-        st.error("Select exactly 4 points on the plan before generating.")
+# Restructure the logic to give clear error messages
+if st.button("Generate Plan Heatmap"):
+    # First, check for the button click, then validate the inputs.
+    if not plan_path:
+        st.error("Please upload a floor plan image first.")
+    elif not csv_path or not os.path.isfile(csv_path):
+        st.error(f"Tracking CSV not found at '{csv_path}'. Please run tracking or verify the path.")
+    elif dst_pts is None or len(dst_pts) != 4:
+        st.error("Please select exactly 4 points on the plan before generating.")
     else:
+        # All conditions are met, so now we can safely run the heatmap generation.
         try:
             result = run_and_save_plan_heatmap(
                 csv_path=csv_path,

@@ -65,35 +65,41 @@ def _accumulate_heatmap(points_plan: np.ndarray, H: int, W: int):
     xs = np.clip(np.round(points_plan[:, 0]).astype(np.int32), 0, W - 1)
     ys = np.clip(np.round(points_plan[:, 1]).astype(np.int32), 0, H - 1)
     for x, y in zip(xs, ys):
-        heat[y, x] += 1.0
+        # Increase the accumulation value to make the heatmap more intense
+        heat[y, x] += 25.0
     return heat
 
 def _smooth_heatmap(heat: np.ndarray, kernel_size: int = 35, sigma: float = 0):
-    k = max(1, int(kernel_size) | 1)  # ensure odd
-    if k > 1:
-        return cv2.GaussianBlur(heat, (k, k), sigmaX=sigma, sigmaY=sigma, borderType=cv2.BORDER_REPLICATE)
-    return heat
+    # Ensure kernel is odd
+    kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
+    return cv2.GaussianBlur(heat, (kernel_size, kernel_size), sigma)
+
 
 def _colorize_and_overlay(plan_bgr: np.ndarray, heat: np.ndarray, alpha: float = 0.6, colormap=cv2.COLORMAP_JET):
-    # Normalize heat to 0..255
-    if np.max(heat) > 0:
-        heat_norm = cv2.normalize(heat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    else:
-        heat_norm = heat.astype(np.uint8)
+    # Normalize the smoothed float heatmap to the 0-255 range
+    heat_u8 = cv2.normalize(heat, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+    
+    # Apply colormap to the normalized 8-bit heatmap
+    color_bgr = cv2.applyColorMap(heat_u8, colormap)
+    
+    # Make areas with no heat transparent in the color map
+    color_bgr[heat_u8 == 0] = 0
+    
+    # Blend the colorized heatmap with the original plan
+    overlay_bgr = cv2.addWeighted(plan_bgr, 1 - alpha, color_bgr, alpha, 0)
+    
+    return {
+        "overlay_bgr": overlay_bgr,
+        "heat_u8": heat_u8,
+        "color_bgr": color_bgr,
+    }
 
-    color = cv2.applyColorMap(heat_norm, colormap)
-
-    # Masked overlay: only blend where heat > 0
-    mask = heat_norm > 0
-    overlay = plan_bgr.copy()
-    overlay[mask] = cv2.addWeighted(plan_bgr[mask], 1 - alpha, color[mask], alpha, 0)
-    return overlay, color, heat_norm
 
 def generate_plan_heatmap_from_csv(
     csv_path: str,
     plan_image_path: str,
     src_points: np.ndarray,
-    dst_points: np.ndarray | None = None,
+    dst_points: np.ndarray,  # The default value is removed. This is now a required argument.
     out_path: str | None = None,
     kernel_size: int = 35,
     sigma: float = 0,
@@ -101,10 +107,7 @@ def generate_plan_heatmap_from_csv(
     colormap: int = cv2.COLORMAP_JET,
 ):
     """
-    csv_path: tracking CSV (expects either columns cx,cy OR x,y,w,h OR x,y)
-    plan_image_path: path to the floor plan image
-    src_points: 4x2 points in the CCTV frame (from homography_config)
-    dst_points: 4x2 points in the plan image (pixel coords). If None, uses plan corners.
+    Generates a heatmap on a floor plan using a homography transformation.
     """
     if not os.path.isfile(csv_path):
         raise FileNotFoundError(f"CSV not found: {csv_path}")
@@ -117,25 +120,16 @@ def generate_plan_heatmap_from_csv(
         raise RuntimeError(f"Failed to read plan image: {plan_image_path}")
     H_plan, W_plan = plan_bgr.shape[:2]
 
-    # Destination points default = image corners
-    if dst_points is None:
-        dst_points = np.array(
-            [
-                [0,           H_plan - 1],  # bottom-left
-                [W_plan - 1,  H_plan - 1],  # bottom-right
-                [W_plan - 1,  0],           # top-right
-                [0,           0],           # top-left
-            ],
-            dtype=np.float32,
-        )
-    else:
-        dst_points = np.asarray(dst_points, dtype=np.float32)
-        if dst_points.shape != (4, 2):
-            raise ValueError("dst_points must be 4x2 array")
+    # --- THIS IS THE FIX ---
+    # The faulty 'if dst_points is None:' block has been completely removed.
+    # We now directly validate the dst_points that are passed in.
+    dst_points = np.asarray(dst_points, dtype=np.float32)
+    if dst_points.shape != (4, 2):
+        raise ValueError(f"dst_points must be a 4x2 array, but got shape {dst_points.shape}")
 
     src_points = np.asarray(src_points, dtype=np.float32)
     if src_points.shape != (4, 2):
-        raise ValueError("src_points must be 4x2 array")
+        raise ValueError(f"src_points must be a 4x2 array, but got shape {src_points.shape}")
 
     # Homography
     Hmat = cv2.getPerspectiveTransform(src_points, dst_points)
@@ -148,24 +142,26 @@ def generate_plan_heatmap_from_csv(
     pts = points_img.reshape(-1, 1, 2).astype(np.float32)
     pts_plan = cv2.perspectiveTransform(pts, Hmat).reshape(-1, 2)
 
-    # Accumulate heatmap
-    heat = _accumulate_heatmap(pts_plan, H_plan, W_plan)
-    heat = _smooth_heatmap(heat, kernel_size=kernel_size, sigma=sigma)
+    # 2. Accumulate points onto a blank canvas
+    heat_raw = _accumulate_heatmap(pts_plan, H_plan, W_plan)
 
-    # Overlay on plan
-    overlay_bgr, color_bgr, heat_u8 = _colorize_and_overlay(plan_bgr, heat, alpha=alpha, colormap=colormap)
+    # 3. Smooth the raw heatmap
+    heat_smooth = _smooth_heatmap(heat_raw, kernel_size, sigma)
 
-    # Save if requested
+    # 4. Colorize and overlay onto the plan
+    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha)
+
+    # 5. Save and return
     if out_path:
         _ensure_dir(out_path)
-        cv2.imwrite(out_path, overlay_bgr)
+        cv2.imwrite(out_path, result["overlay_bgr"])
 
-    # Return overlay (BGR), heat raw, and homography for debugging if needed
+    # Return overlay (BGR) and other artifacts for debugging
     return {
-        "overlay_bgr": overlay_bgr,
-        "heat": heat,
-        "heat_u8": heat_u8,
-        "color_bgr": color_bgr,
+        "overlay_bgr": result["overlay_bgr"],
+        "heat": heat_raw,
+        "heat_u8": result["heat_u8"],
+        "color_bgr": result["color_bgr"],
         "H": Hmat,
         "plan_size": (H_plan, W_plan),
         "points_plan": pts_plan,
