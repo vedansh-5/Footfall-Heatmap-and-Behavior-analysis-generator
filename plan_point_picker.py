@@ -34,7 +34,8 @@ def pick_plan_points(plan_file, state_key: str = "plan_pts") -> Tuple[Optional[s
     st.info("Click 4 points on the plan image below. The coordinates will be recorded in order.")
 
     # Display the image and get coordinates on click
-    value = streamlit_image_coordinates(img, key=f"{state_key}_picker")
+    # Add a 'width' parameter to constrain the display size and fix the layout
+    value = streamlit_image_coordinates(img, width=700, key=f"{state_key}_picker")
 
     # If the user clicked, 'value' will contain the coordinates
     if value:
