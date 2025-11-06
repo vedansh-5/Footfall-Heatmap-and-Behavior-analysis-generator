@@ -7,7 +7,6 @@ def _ensure_dir(path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
 def _parse_points_str(points_str: str):
-    # "x1,y1; x2,y2; x3,y3; x4,y4" -> np.array shape (4,2)
     pts = []
     for token in points_str.replace("\n", " ").split(";"):
         token = token.strip()
@@ -21,10 +20,8 @@ def _parse_points_str(points_str: str):
     return pts
 
 def _select_points_from_df(df: pd.DataFrame):
-    # Return Nx2 array of foot positions (image coords) inferred from CSV columns
     cols = set(c.lower() for c in df.columns)
 
-    # Normalize column names
     rename_map = {}
     for c in df.columns:
         lc = c.lower()
@@ -42,15 +39,12 @@ def _select_points_from_df(df: pd.DataFrame):
 
     points = None
     if {"cx", "cy"}.issubset(cols):
-        # Use provided centers (assumed foot position if already at feet)
         points = df[["cx", "cy"]].to_numpy(np.float32)
     elif {"x", "y", "w", "h"}.issubset(cols):
-        # Use bbox bottom-center as foot position
         cx = df["x"].to_numpy(np.float32) + df["w"].to_numpy(np.float32) / 2.0
         cy = df["y"].to_numpy(np.float32) + df["h"].to_numpy(np.float32)
         points = np.stack([cx, cy], axis=1)
     elif {"x", "y"}.issubset(cols):
-        # If only x,y are present, assume they already represent the foot point
         points = df[["x", "y"]].to_numpy(np.float32)
     else:
         raise ValueError(
@@ -61,43 +55,31 @@ def _select_points_from_df(df: pd.DataFrame):
 
 def _accumulate_heatmap(points_plan: np.ndarray, H: int, W: int):
     heat = np.zeros((H, W), dtype=np.float32)
-    # Round and accumulate
     xs = np.clip(np.round(points_plan[:, 0]).astype(np.int32), 0, W - 1)
     ys = np.clip(np.round(points_plan[:, 1]).astype(np.int32), 0, H - 1)
     for x, y in zip(xs, ys):
-        # Revert accumulation value to a standard value
         heat[y, x] += 1.0
     return heat
 
 def _smooth_heatmap(heat: np.ndarray, kernel_size: int = 35, sigma: float = 0):
-    # Ensure kernel is odd
     kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
     smoothed = cv2.GaussianBlur(heat, (kernel_size, kernel_size), sigma)
-    # Remove the logarithmic scaling which was making the heatmap too dim.
     return smoothed
 
 
 def _colorize_and_overlay(plan_bgr: np.ndarray, heat: np.ndarray, alpha: float = 0.6, colormap=cv2.COLORMAP_JET):
-    # --- THIS IS THE FIX ---
-    # Clip extreme values to the 99th percentile. This prevents a few
-    # very bright spots from washing out the colors in the rest of the heatmap.
     p99 = np.percentile(heat[heat > 0], 99) if np.any(heat > 0) else 0
     if p99 > 0:
         heat_clipped = np.clip(heat, 0, p99)
     else:
         heat_clipped = heat
 
-    # Normalize the clipped heatmap to the 0-255 range
     heat_u8 = cv2.normalize(heat_clipped, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-    # --- END FIX ---
     
-    # Apply colormap to the normalized 8-bit heatmap
     color_bgr = cv2.applyColorMap(heat_u8, colormap)
     
-    # Make areas with no heat transparent in the color map
     color_bgr[heat_u8 == 0] = 0
     
-    # Blend the colorized heatmap with the original plan
     overlay_bgr = cv2.addWeighted(plan_bgr, 1 - alpha, color_bgr, alpha, 0)
     
     return {
@@ -111,51 +93,37 @@ def generate_plan_heatmap_from_csv(
     csv_path: str,
     plan_image_path: str,
     src_points: np.ndarray,
-    dst_points: np.ndarray,  # The default value is removed. This is now a required argument.
+    dst_points: np.ndarray,
     out_path: str | None = None,
     kernel_size: int = 35,
     sigma: float = 0,
     alpha: float = 0.6,
     colormap: int = cv2.COLORMAP_JET,
 ):
-    """
-    Generates a heatmap on a floor plan using a homography transformation.
-    """
     if not os.path.isfile(csv_path):
         raise FileNotFoundError(f"CSV not found: {csv_path}")
     if not os.path.isfile(plan_image_path):
         raise FileNotFoundError(f"Plan image not found: {plan_image_path}")
 
-    # Load plan image (BGR)
     plan_bgr = cv2.imread(plan_image_path, cv2.IMREAD_COLOR)
     if plan_bgr is None:
         raise RuntimeError(f"Failed to read plan image: {plan_image_path}")
     H_plan, W_plan = plan_bgr.shape[:2]
 
-    # --- THIS IS THE FIX ---
-    # To invert the heatmap vertically, we flip the destination points.
-    # The homography will now map the source trapezoid to an inverted
-    # version of the destination rectangle, effectively flipping the result.
     dst_points_flipped = np.array([
-        dst_points[3],  # Bottom-left
-        dst_points[2],  # Bottom-right
-        dst_points[1],  # Top-right
-        dst_points[0],  # Top-left
+        dst_points[3],
+        dst_points[2],
+        dst_points[1],
+        dst_points[0],
     ], dtype=np.float32)
     Hmat = cv2.getPerspectiveTransform(src_points, dst_points_flipped)
-    # --- END FIX ---
 
-    # 1. Select points from CSV and transform them
     df = pd.read_csv(csv_path)
-    points_img = _select_points_from_df(df)  # Nx2
+    points_img = _select_points_from_df(df)
 
-    # Warp points to plan pixel coords
     pts = points_img.reshape(-1, 1, 2).astype(np.float32)
     pts_plan = cv2.perspectiveTransform(pts, Hmat).reshape(-1, 2)
 
-    # --- THIS IS THE FIX ---
-    # The bounding box for filtering must be calculated from the original destination points,
-    # as there is no longer a flipped coordinate system.
     x_min, y_min = np.min(dst_points, axis=0)
     x_max, y_max = np.max(dst_points, axis=0)
     
@@ -166,26 +134,17 @@ def generate_plan_heatmap_from_csv(
         (pts_plan[:, 1] <= y_max)
     )
     pts_plan_filtered = pts_plan[inside_mask]
-    # --- END FIX ---
 
-    # 2. Accumulate points onto a blank canvas (use the filtered points)
     heat_raw = _accumulate_heatmap(pts_plan_filtered, H_plan, W_plan)
 
-    # 3. Smooth the raw heatmap
     heat_smooth = _smooth_heatmap(heat_raw, kernel_size, sigma)
 
-    # 4. Colorize and overlay onto the plan
-    # --- THIS IS THE FIX ---
-    # Increase the alpha to make the heatmap more opaque and vibrant.
     result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha=0.75, colormap=cv2.COLORMAP_INFERNO)
-    # --- END FIX ---
 
-    # 5. Save and return
     if out_path:
         _ensure_dir(out_path)
         cv2.imwrite(out_path, result["overlay_bgr"])
 
-    # Return overlay (BGR) and other artifacts for debugging
     return {
         "overlay_bgr": result["overlay_bgr"],
         "heat": heat_raw,
@@ -197,5 +156,4 @@ def generate_plan_heatmap_from_csv(
     }
 
 def parse_points_str(points_str: str):
-    # Expose parser for Streamlit use
     return _parse_points_str(points_str)

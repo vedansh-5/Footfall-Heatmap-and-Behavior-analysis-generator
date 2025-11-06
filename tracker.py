@@ -11,10 +11,8 @@ def resize_frame(frame, max_dim=640):
     return cv2.resize(frame, (new_w, new_h))
     
 def track_video(video_path, output_path):
-    # YOLO detection model
-    model = YOLO("yolov8n.pt")  # lightweight CPU model
+    model = YOLO("yolov8n.pt")
     
-    # DeepSORT tracker
     tracker = DeepSort(max_age=30)
 
     cap = cv2.VideoCapture(video_path)
@@ -32,11 +30,10 @@ def track_video(video_path, output_path):
         if not ret:
             break
         results = model(frame)[0]
-        detections = []  #detects all
+        detections = []
         
-        # Filter detections to only include the 'person' class (class ID 0)
         for box, conf, cls in zip(results.boxes.xyxy, results.boxes.conf, results.boxes.cls):
-            if int(cls) == 0: # 0 is the class ID for 'person' in COCO
+            if int(cls) == 0:
                 x1, y1, x2, y2 = box.tolist()
                 detections.append([[x1, y1, x2-x1, y2-y1], conf, int(cls)])
 
@@ -50,7 +47,7 @@ def track_video(video_path, output_path):
                 all_tracks.append([frame_num, track_id, cls, x, y, w, h])
                 cv2.rectangle(frame, (int(x), int(y)), (int(x+w), int(y+h)), (0,255,0), 2)
                 cv2.putText(frame, f"ID:{track_id}", (int(x), int(y-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
-
+        
         out.write(frame)
         frame_num += 5
 

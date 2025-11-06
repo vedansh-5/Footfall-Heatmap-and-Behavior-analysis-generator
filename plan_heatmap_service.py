@@ -17,7 +17,6 @@ def run_and_save_plan_heatmap(csv_path: str, plan_path: str, src_points: np.ndar
         sigma=sigma,
         alpha=alpha,
     )
-    # Save extra layers too
     cv2.imwrite("output/plan_heatmap/heat_u8.png", result["heat_u8"])
     cv2.imwrite("output/plan_heatmap/heat_color.png", result["color_bgr"])
     result["paths"] = {
