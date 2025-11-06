@@ -65,23 +65,31 @@ def _accumulate_heatmap(points_plan: np.ndarray, H: int, W: int):
     xs = np.clip(np.round(points_plan[:, 0]).astype(np.int32), 0, W - 1)
     ys = np.clip(np.round(points_plan[:, 1]).astype(np.int32), 0, H - 1)
     for x, y in zip(xs, ys):
-        # Decrease the accumulation value to prevent oversaturation in one spot
-        heat[y, x] += 25.0
+        # Revert accumulation value to a standard value
+        heat[y, x] += 1.0
     return heat
 
 def _smooth_heatmap(heat: np.ndarray, kernel_size: int = 35, sigma: float = 0):
     # Ensure kernel is odd
     kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
     smoothed = cv2.GaussianBlur(heat, (kernel_size, kernel_size), sigma)
-    # Apply a logarithmic scale to compress the range of high values
-    # and bring out more detail in the lower-intensity areas.
-    # Add 1 to avoid log(0) errors.
-    return np.log1p(smoothed)
+    # Remove the logarithmic scaling which was making the heatmap too dim.
+    return smoothed
 
 
 def _colorize_and_overlay(plan_bgr: np.ndarray, heat: np.ndarray, alpha: float = 0.6, colormap=cv2.COLORMAP_JET):
-    # Normalize the smoothed float heatmap to the 0-255 range
-    heat_u8 = cv2.normalize(heat, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+    # --- THIS IS THE FIX ---
+    # Clip extreme values to the 99th percentile. This prevents a few
+    # very bright spots from washing out the colors in the rest of the heatmap.
+    p99 = np.percentile(heat[heat > 0], 99) if np.any(heat > 0) else 0
+    if p99 > 0:
+        heat_clipped = np.clip(heat, 0, p99)
+    else:
+        heat_clipped = heat
+
+    # Normalize the clipped heatmap to the 0-255 range
+    heat_u8 = cv2.normalize(heat_clipped, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+    # --- END FIX ---
     
     # Apply colormap to the normalized 8-bit heatmap
     color_bgr = cv2.applyColorMap(heat_u8, colormap)
@@ -167,9 +175,9 @@ def generate_plan_heatmap_from_csv(
     heat_smooth = _smooth_heatmap(heat_raw, kernel_size, sigma)
 
     # 4. Colorize and overlay onto the plan
-    # --- THIS IS THE FIX for the color ---
-    # Change the colormap back to JET, which provides the Red -> Yellow -> Blue scale.
-    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha, colormap=cv2.COLORMAP_JET)
+    # --- THIS IS THE FIX ---
+    # Increase the alpha to make the heatmap more opaque and vibrant.
+    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha=0.75, colormap=cv2.COLORMAP_INFERNO)
     # --- END FIX ---
 
     # 5. Save and return
