@@ -120,12 +120,11 @@ def generate_plan_heatmap_from_csv(
         raise RuntimeError(f"Failed to read plan image: {plan_image_path}")
     H_plan, W_plan = plan_bgr.shape[:2]
 
-    # --- THIS IS THE FIX for the inversion ---
-    # Flip the y-coordinates of the destination points to fix the vertical inversion.
-    # This aligns the top of the video (y=0) with the top of the selected plan area.
-    dst_points_flipped = dst_points.copy()
-    dst_points_flipped[:, 1] = H_plan - dst_points_flipped[:, 1]
-    Hmat = cv2.getPerspectiveTransform(src_points, dst_points_flipped)
+    # --- THIS IS THE FIX ---
+    # All previous flipping logic has been removed.
+    # The transformation now directly maps the source points from the video
+    # to the destination points you click on the plan.
+    Hmat = cv2.getPerspectiveTransform(src_points, dst_points)
     # --- END FIX ---
 
     # 1. Select points from CSV and transform them
@@ -136,6 +135,9 @@ def generate_plan_heatmap_from_csv(
     pts = points_img.reshape(-1, 1, 2).astype(np.float32)
     pts_plan = cv2.perspectiveTransform(pts, Hmat).reshape(-1, 2)
 
+    # --- THIS IS THE FIX ---
+    # The bounding box for filtering must be calculated from the original destination points,
+    # as there is no longer a flipped coordinate system.
     x_min, y_min = np.min(dst_points, axis=0)
     x_max, y_max = np.max(dst_points, axis=0)
     
@@ -156,8 +158,8 @@ def generate_plan_heatmap_from_csv(
 
     # 4. Colorize and overlay onto the plan
     # --- THIS IS THE FIX for the color ---
-    # Change the colormap to HOT for a more intuitive heat representation
-    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha, colormap=cv2.COLORMAP_HOT)
+    # Change the colormap back to JET, which provides the Red -> Yellow -> Blue scale.
+    result = _colorize_and_overlay(plan_bgr, heat_smooth, alpha, colormap=cv2.COLORMAP_JET)
     # --- END FIX ---
 
     # 5. Save and return
