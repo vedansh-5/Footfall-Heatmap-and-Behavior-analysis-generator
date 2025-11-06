@@ -72,7 +72,11 @@ def _accumulate_heatmap(points_plan: np.ndarray, H: int, W: int):
 def _smooth_heatmap(heat: np.ndarray, kernel_size: int = 35, sigma: float = 0):
     # Ensure kernel is odd
     kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-    return cv2.GaussianBlur(heat, (kernel_size, kernel_size), sigma)
+    smoothed = cv2.GaussianBlur(heat, (kernel_size, kernel_size), sigma)
+    # Apply a logarithmic scale to compress the range of high values
+    # and bring out more detail in the lower-intensity areas.
+    # Add 1 to avoid log(0) errors.
+    return np.log1p(smoothed)
 
 
 def _colorize_and_overlay(plan_bgr: np.ndarray, heat: np.ndarray, alpha: float = 0.6, colormap=cv2.COLORMAP_JET):
