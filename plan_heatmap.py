@@ -121,10 +121,16 @@ def generate_plan_heatmap_from_csv(
     H_plan, W_plan = plan_bgr.shape[:2]
 
     # --- THIS IS THE FIX ---
-    # All previous flipping logic has been removed.
-    # The transformation now directly maps the source points from the video
-    # to the destination points you click on the plan.
-    Hmat = cv2.getPerspectiveTransform(src_points, dst_points)
+    # To invert the heatmap vertically, we flip the destination points.
+    # The homography will now map the source trapezoid to an inverted
+    # version of the destination rectangle, effectively flipping the result.
+    dst_points_flipped = np.array([
+        dst_points[3],  # Bottom-left
+        dst_points[2],  # Bottom-right
+        dst_points[1],  # Top-right
+        dst_points[0],  # Top-left
+    ], dtype=np.float32)
+    Hmat = cv2.getPerspectiveTransform(src_points, dst_points_flipped)
     # --- END FIX ---
 
     # 1. Select points from CSV and transform them
