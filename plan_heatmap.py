@@ -58,7 +58,7 @@ def _accumulate_heatmap(points_plan: np.ndarray, H: int, W: int):
     xs = np.clip(np.round(points_plan[:, 0]).astype(np.int32), 0, W - 1)
     ys = np.clip(np.round(points_plan[:, 1]).astype(np.int32), 0, H - 1)
     for x, y in zip(xs, ys):
-        heat[y, x] += 1.0
+        heat[y, x] += 50.0
     return heat
 
 def _smooth_heatmap(heat: np.ndarray, kernel_size: int = 35, sigma: float = 0):
