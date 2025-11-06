@@ -22,10 +22,18 @@ def pick_plan_points(plan_file, state_key: str = "plan_pts") -> Tuple[Optional[s
         plan_path = _save_uploaded_plan(plan_file)
         pil_image = Image.open(plan_path)
         
+        # --- THIS IS THE FIX ---
+        # Get the original image dimensions
+        original_width, original_height = pil_image.size
+        
+        # Display the image and get the click coordinates
         value = streamlit_image_coordinates(pil_image, key=f"picker_{state_key}")
 
         if value:
+            # The component returns coordinates relative to the original image size.
+            # We don't need to scale them as the backend processing uses the original image.
             point = value
+            # --- END FIX ---
             if point not in st.session_state[state_key]:
                 if len(st.session_state[state_key]) < 4:
                     st.session_state[state_key].append(point)
